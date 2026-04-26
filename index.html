@@ -1,0 +1,1689 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>NVIDIA GPU 22 — Warp Scheduling & SIMT Mechanics</title>
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;500;700&family=Space+Grotesk:wght@400;500;600;700&family=Inter:wght@400;500;600&display=swap" rel="stylesheet">
+    <style>
+        :root {
+            --bg-primary: #0a0a0a;
+            --bg-card: #0d1117;
+            --bg-code: #161b22;
+            --text-primary: #e6edf3;
+            --text-secondary: #8b949e;
+            --accent: #76B900;
+            --accent-dim: #76B90044;
+            --accent-glow: #76B90033;
+            --border: #21262d;
+            --font-display: 'Space Grotesk', sans-serif;
+            --font-mono: 'JetBrains Mono', 'Fira Code', monospace;
+            --font-body: 'Inter', sans-serif;
+            --max-width: 900px;
+        }
+
+        *, *::before, *::after {
+            box-sizing: border-box;
+            margin: 0;
+            padding: 0;
+        }
+
+        html {
+            scroll-behavior: smooth;
+        }
+
+        body {
+            background: var(--bg-primary);
+            color: var(--text-primary);
+            font-family: var(--font-body);
+            font-size: 17px;
+            line-height: 1.7;
+            overflow-x: hidden;
+        }
+
+        /* ── Header ── */
+        .hero {
+            min-height: 100vh;
+            display: flex;
+            flex-direction: column;
+            justify-content: center;
+            align-items: center;
+            padding: 2rem 1.5rem;
+            text-align: center;
+            position: relative;
+        }
+
+        .hero::before {
+            content: '';
+            position: absolute;
+            top: 0;
+            left: 50%;
+            transform: translateX(-50%);
+            width: 600px;
+            height: 600px;
+            background: radial-gradient(circle, var(--accent-glow) 0%, transparent 70%);
+            pointer-events: none;
+            z-index: 0;
+        }
+
+        .hero > * {
+            position: relative;
+            z-index: 1;
+        }
+
+        .series-label {
+            font-family: var(--font-mono);
+            font-size: 0.85rem;
+            color: var(--accent);
+            letter-spacing: 0.15em;
+            text-transform: uppercase;
+            margin-bottom: 1rem;
+        }
+
+        .hero h1 {
+            font-family: var(--font-display);
+            font-size: clamp(2rem, 5vw, 3.2rem);
+            font-weight: 700;
+            color: var(--text-primary);
+            line-height: 1.2;
+            margin-bottom: 1rem;
+        }
+
+        .hero h1 .accent {
+            color: var(--accent);
+        }
+
+        .hero .subtitle {
+            font-size: 1.1rem;
+            color: var(--text-secondary);
+            max-width: 600px;
+            margin-bottom: 2rem;
+        }
+
+        /* ── Tag Pills ── */
+        .tags {
+            display: flex;
+            flex-wrap: wrap;
+            gap: 0.5rem;
+            justify-content: center;
+            margin-bottom: 2.5rem;
+        }
+
+        .tag {
+            font-family: var(--font-mono);
+            font-size: 0.75rem;
+            padding: 0.25rem 0.75rem;
+            border-radius: 999px;
+            border: 1px solid var(--accent);
+            color: var(--accent);
+            background: var(--accent-dim);
+            white-space: nowrap;
+        }
+
+        /* ── Pipeline Flow Bar ── */
+        .pipeline {
+            display: flex;
+            flex-wrap: wrap;
+            align-items: center;
+            justify-content: center;
+            gap: 0.25rem;
+            margin-bottom: 1rem;
+            max-width: var(--max-width);
+        }
+
+        .pipeline-step {
+            font-family: var(--font-mono);
+            font-size: 0.7rem;
+            padding: 0.3rem 0.7rem;
+            background: var(--bg-card);
+            border: 1px solid var(--border);
+            border-radius: 4px;
+            color: var(--text-secondary);
+            white-space: nowrap;
+        }
+
+        .pipeline-arrow {
+            color: var(--accent);
+            font-size: 0.9rem;
+            font-weight: 700;
+        }
+
+        /* ── Slides ── */
+        .slide {
+            min-height: 100vh;
+            max-width: var(--max-width);
+            margin: 0 auto;
+            padding: 4rem 1.5rem;
+            position: relative;
+            display: flex;
+            flex-direction: column;
+            justify-content: center;
+        }
+
+        .slide-number {
+            font-family: var(--font-display);
+            font-size: 5rem;
+            font-weight: 700;
+            color: var(--accent-dim);
+            position: absolute;
+            top: 2rem;
+            right: 1.5rem;
+            line-height: 1;
+            user-select: none;
+        }
+
+        .slide h2 {
+            font-family: var(--font-display);
+            font-size: 1.9rem;
+            font-weight: 700;
+            color: var(--accent);
+            margin-bottom: 1.5rem;
+            line-height: 1.25;
+        }
+
+        .slide h3 {
+            font-family: var(--font-display);
+            font-size: 1.3rem;
+            font-weight: 600;
+            color: var(--text-primary);
+            margin-top: 1.5rem;
+            margin-bottom: 0.75rem;
+        }
+
+        .slide p {
+            margin-bottom: 1rem;
+            color: var(--text-secondary);
+        }
+
+        .slide p strong {
+            color: var(--text-primary);
+        }
+
+        .slide ul, .slide ol {
+            margin-bottom: 1rem;
+            padding-left: 1.5rem;
+            color: var(--text-secondary);
+        }
+
+        .slide li {
+            margin-bottom: 0.4rem;
+        }
+
+        .slide li strong {
+            color: var(--text-primary);
+        }
+
+        /* ── Code Blocks ── */
+        .code-block {
+            background: var(--bg-code);
+            border: 1px solid var(--border);
+            border-radius: 8px;
+            margin: 1.25rem 0;
+            overflow: hidden;
+        }
+
+        .code-header {
+            font-family: var(--font-mono);
+            font-size: 0.75rem;
+            color: var(--accent);
+            background: rgba(118, 185, 0, 0.08);
+            padding: 0.4rem 1rem;
+            border-bottom: 1px solid var(--border);
+        }
+
+        .code-block pre {
+            margin: 0;
+            padding: 1rem;
+            overflow-x: auto;
+        }
+
+        .code-block code {
+            font-family: var(--font-mono);
+            font-size: 0.85rem;
+            line-height: 1.6;
+            color: #c9d1d9;
+        }
+
+        /* Syntax highlighting (manual) */
+        .kw { color: #ff7b72; }
+        .fn { color: #d2a8ff; }
+        .str { color: #a5d6ff; }
+        .cm { color: #8b949e; font-style: italic; }
+        .num { color: #79c0ff; }
+        .type { color: #ffa657; }
+        .dir { color: #ff7b72; }
+        .mac { color: #ffa657; }
+
+        /* ── Tables ── */
+        .table-wrap {
+            overflow-x: auto;
+            margin: 1.25rem 0;
+            border-radius: 8px;
+            border: 1px solid var(--border);
+        }
+
+        table {
+            width: 100%;
+            border-collapse: collapse;
+            font-size: 0.9rem;
+        }
+
+        th {
+            background: var(--bg-code);
+            color: var(--accent);
+            font-weight: 600;
+            text-align: left;
+            padding: 0.75rem 1rem;
+            border-bottom: 1px solid var(--border);
+            font-family: var(--font-display);
+            white-space: nowrap;
+        }
+
+        td {
+            padding: 0.6rem 1rem;
+            border-bottom: 1px solid var(--border);
+            color: var(--text-secondary);
+        }
+
+        tr:last-child td {
+            border-bottom: none;
+        }
+
+        tr:nth-child(even) td {
+            background: rgba(13, 17, 23, 0.5);
+        }
+
+        /* ── Diagrams ── */
+        .diagram-flow {
+            display: flex;
+            flex-wrap: wrap;
+            align-items: center;
+            justify-content: center;
+            gap: 0.5rem;
+            margin: 1.5rem 0;
+            padding: 1.5rem;
+            background: var(--bg-card);
+            border: 1px solid var(--border);
+            border-radius: 8px;
+        }
+
+        .diagram-box {
+            font-family: var(--font-mono);
+            font-size: 0.85rem;
+            padding: 0.5rem 1rem;
+            background: var(--bg-code);
+            border: 1px solid var(--border);
+            border-radius: 6px;
+            color: var(--text-primary);
+            text-align: center;
+            white-space: nowrap;
+        }
+
+        .diagram-box.accent {
+            border-color: var(--accent);
+            color: var(--accent);
+            background: rgba(118, 185, 0, 0.08);
+        }
+
+        .diagram-box.dim {
+            color: var(--text-secondary);
+            border-color: var(--border);
+        }
+
+        .diagram-arrow {
+            color: var(--accent);
+            font-size: 1.3rem;
+            font-weight: 700;
+        }
+
+        /* Vertical flow diagrams */
+        .diagram-vertical {
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            gap: 0.3rem;
+            margin: 1.5rem 0;
+            padding: 1.5rem;
+            background: var(--bg-card);
+            border: 1px solid var(--border);
+            border-radius: 8px;
+        }
+
+        .diagram-vertical .diagram-arrow {
+            font-size: 1.1rem;
+        }
+
+        /* Nested hierarchy diagram */
+        .hierarchy {
+            display: flex;
+            flex-direction: column;
+            gap: 0.75rem;
+            margin: 1.5rem 0;
+            padding: 1.5rem;
+            background: var(--bg-card);
+            border: 1px solid var(--border);
+            border-radius: 8px;
+        }
+
+        .hierarchy-level {
+            display: flex;
+            align-items: center;
+            gap: 0.75rem;
+        }
+
+        .hierarchy-label {
+            font-family: var(--font-mono);
+            font-size: 0.75rem;
+            color: var(--text-secondary);
+            min-width: 80px;
+            text-align: right;
+        }
+
+        .hierarchy-items {
+            display: flex;
+            flex-wrap: wrap;
+            gap: 0.35rem;
+        }
+
+        .hierarchy-item {
+            font-family: var(--font-mono);
+            font-size: 0.75rem;
+            padding: 0.3rem 0.6rem;
+            border-radius: 4px;
+            background: var(--bg-code);
+            border: 1px solid var(--border);
+            color: var(--text-secondary);
+        }
+
+        .hierarchy-item.accent {
+            border-color: var(--accent);
+            color: var(--accent);
+            background: rgba(118, 185, 0, 0.08);
+        }
+
+        /* Grid diagram */
+        .diagram-grid {
+            display: grid;
+            gap: 0.75rem;
+            margin: 1.5rem 0;
+            padding: 1.5rem;
+            background: var(--bg-card);
+            border: 1px solid var(--border);
+            border-radius: 8px;
+        }
+
+        .diagram-grid.cols-2 {
+            grid-template-columns: 1fr 1fr;
+        }
+
+        .diagram-grid.cols-3 {
+            grid-template-columns: 1fr 1fr 1fr;
+        }
+
+        .diagram-panel {
+            padding: 1rem;
+            background: var(--bg-code);
+            border: 1px solid var(--border);
+            border-radius: 6px;
+        }
+
+        .diagram-panel.accent-border {
+            border-left: 3px solid var(--accent);
+        }
+
+        .diagram-panel h4 {
+            font-family: var(--font-display);
+            font-size: 1rem;
+            color: var(--accent);
+            margin-bottom: 0.5rem;
+        }
+
+        .diagram-panel p, .diagram-panel ul {
+            font-size: 0.85rem;
+        }
+
+        /* ── Callout Boxes ── */
+        .callout {
+            background: var(--bg-card);
+            border-left: 3px solid var(--accent);
+            border-radius: 0 8px 8px 0;
+            padding: 1rem 1.25rem;
+            margin: 1.25rem 0;
+        }
+
+        .callout p {
+            margin-bottom: 0;
+        }
+
+        .callout .callout-label {
+            font-family: var(--font-mono);
+            font-size: 0.75rem;
+            color: var(--accent);
+            text-transform: uppercase;
+            letter-spacing: 0.1em;
+            margin-bottom: 0.3rem;
+        }
+
+        /* ── Tier Visual ── */
+        .tier-visual {
+            display: flex;
+            flex-direction: column;
+            gap: 0.5rem;
+            margin: 1.5rem 0;
+            padding: 1.5rem;
+            background: var(--bg-card);
+            border: 1px solid var(--border);
+            border-radius: 8px;
+        }
+
+        .tier-bar {
+            display: flex;
+            align-items: center;
+            gap: 0.75rem;
+        }
+
+        .tier-label {
+            font-family: var(--font-mono);
+            font-size: 0.75rem;
+            color: var(--text-secondary);
+            min-width: 90px;
+            text-align: right;
+        }
+
+        .tier-fill {
+            height: 32px;
+            border-radius: 4px;
+            display: flex;
+            align-items: center;
+            padding: 0 0.75rem;
+            font-family: var(--font-mono);
+            font-size: 0.7rem;
+            white-space: nowrap;
+            transition: width 0.6s ease;
+        }
+
+        .tier-cost {
+            font-family: var(--font-mono);
+            font-size: 0.7rem;
+            color: var(--text-secondary);
+            min-width: 70px;
+        }
+
+        /* ── Contents list ── */
+        .contents-list {
+            list-style: none;
+            padding-left: 0;
+            counter-reset: contents;
+        }
+
+        .contents-list li {
+            counter-increment: contents;
+            padding: 0.6rem 0;
+            border-bottom: 1px solid var(--border);
+            display: flex;
+            align-items: center;
+            gap: 1rem;
+        }
+
+        .contents-list li:last-child {
+            border-bottom: none;
+        }
+
+        .contents-list li::before {
+            content: counter(contents, decimal-leading-zero);
+            font-family: var(--font-mono);
+            font-size: 0.85rem;
+            color: var(--accent);
+            min-width: 2rem;
+        }
+
+        .contents-list a {
+            color: var(--text-primary);
+            text-decoration: none;
+            transition: color 0.2s;
+        }
+
+        .contents-list a:hover {
+            color: var(--accent);
+        }
+
+        /* ── Footer ── */
+        .footer {
+            text-align: center;
+            padding: 3rem 1.5rem;
+            color: var(--text-secondary);
+            font-size: 0.85rem;
+            border-top: 1px solid var(--border);
+            max-width: var(--max-width);
+            margin: 0 auto;
+        }
+
+        .footer a {
+            color: var(--accent);
+            text-decoration: none;
+        }
+
+        .footer a:hover {
+            text-decoration: underline;
+        }
+
+        /* ── Responsive ── */
+        @media (max-width: 640px) {
+            .slide {
+                padding: 3rem 1rem;
+                min-height: auto;
+            }
+
+            .slide-number {
+                font-size: 3rem;
+                top: 1.5rem;
+                right: 1rem;
+            }
+
+            .slide h2 {
+                font-size: 1.5rem;
+            }
+
+            .diagram-grid.cols-2,
+            .diagram-grid.cols-3 {
+                grid-template-columns: 1fr;
+            }
+
+            .pipeline {
+                gap: 0.15rem;
+            }
+
+            .pipeline-step {
+                font-size: 0.6rem;
+                padding: 0.2rem 0.4rem;
+            }
+
+            .hero h1 {
+                font-size: 1.8rem;
+            }
+
+            table {
+                font-size: 0.78rem;
+            }
+
+            .tier-label {
+                min-width: 60px;
+                font-size: 0.65rem;
+            }
+
+            .tier-fill {
+                font-size: 0.6rem;
+                height: 26px;
+            }
+        }
+
+        /* ── Interactive controls (added for Local LLM series) ── */
+        .control-panel {
+            background: var(--bg-card);
+            border: 1px solid var(--border);
+            border-radius: 8px;
+            padding: 1.25rem;
+            margin: 1.25rem 0;
+        }
+        .control-row {
+            display: flex;
+            flex-wrap: wrap;
+            align-items: center;
+            gap: 0.75rem;
+            margin-bottom: 0.75rem;
+        }
+        .control-row label {
+            font-family: var(--font-mono);
+            font-size: 0.8rem;
+            color: var(--text-secondary);
+            min-width: 180px;
+        }
+        .control-row input[type="range"] {
+            flex: 1;
+            min-width: 160px;
+            accent-color: var(--accent);
+        }
+        .control-row input[type="number"],
+        .control-row select {
+            background: var(--bg-code);
+            border: 1px solid var(--border);
+            color: var(--text-primary);
+            border-radius: 4px;
+            padding: 0.3rem 0.5rem;
+            font-family: var(--font-mono);
+            font-size: 0.8rem;
+        }
+        .control-row .val {
+            font-family: var(--font-mono);
+            font-size: 0.85rem;
+            color: var(--accent);
+            min-width: 80px;
+            text-align: right;
+        }
+        .btn {
+            font-family: var(--font-mono);
+            font-size: 0.8rem;
+            padding: 0.4rem 0.9rem;
+            background: var(--accent-dim);
+            color: var(--accent);
+            border: 1px solid var(--accent);
+            border-radius: 4px;
+            cursor: pointer;
+            transition: background 0.15s ease;
+        }
+        .btn:hover { background: rgba(118, 185, 0, 0.2); }
+        .btn:disabled { opacity: 0.4; cursor: not-allowed; }
+        .btn.secondary {
+            background: var(--bg-code);
+            color: var(--text-secondary);
+            border-color: var(--border);
+        }
+        .result-box {
+            background: var(--bg-code);
+            border: 1px solid var(--border);
+            border-left: 3px solid var(--accent);
+            border-radius: 4px;
+            padding: 0.75rem 1rem;
+            font-family: var(--font-mono);
+            font-size: 0.85rem;
+            color: var(--text-primary);
+            margin-top: 0.75rem;
+        }
+        .result-box .line-label { color: var(--text-secondary); }
+        .result-box .line-val   { color: var(--accent); font-weight: 600; }
+        .metric-grid {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(150px, 1fr));
+            gap: 0.5rem;
+            margin-top: 0.75rem;
+        }
+        .metric {
+            background: var(--bg-code);
+            border: 1px solid var(--border);
+            border-radius: 6px;
+            padding: 0.6rem 0.8rem;
+            text-align: center;
+        }
+        .metric .metric-label {
+            font-family: var(--font-mono);
+            font-size: 0.7rem;
+            color: var(--text-secondary);
+            text-transform: uppercase;
+            letter-spacing: 0.08em;
+        }
+        .metric .metric-value {
+            font-family: var(--font-display);
+            font-size: 1.25rem;
+            color: var(--accent);
+            font-weight: 600;
+            margin-top: 0.2rem;
+        }
+
+        /* Canvas / SVG containers */
+        .canvas-wrap {
+            background: var(--bg-card);
+            border: 1px solid var(--border);
+            border-radius: 8px;
+            padding: 1rem;
+            margin: 1.25rem 0;
+            overflow-x: auto;
+        }
+        .canvas-wrap canvas,
+        .canvas-wrap svg {
+            display: block;
+            margin: 0 auto;
+            max-width: 100%;
+        }
+
+        /* Small inline badge */
+        .badge {
+            display: inline-block;
+            font-family: var(--font-mono);
+            font-size: 0.65rem;
+            padding: 0.1rem 0.45rem;
+            border-radius: 999px;
+            border: 1px solid var(--border);
+            color: var(--text-secondary);
+            vertical-align: middle;
+            margin-left: 0.3rem;
+        }
+        .badge.ok    { border-color: var(--accent); color: var(--accent); background: var(--accent-dim); }
+        .badge.warn  { border-color: #ffa657; color: #ffa657; background: rgba(255,166,87,0.08); }
+        .badge.bad   { border-color: #ff7b72; color: #ff7b72; background: rgba(255,123,114,0.08); }
+
+    </style>
+</head>
+<body>
+
+<header class="hero">
+    <div class="series-label">NVIDIA GPU Architectures Series — Presentation 22</div>
+    <h1><span class="accent">Warp Scheduling &amp; SIMT</span> &mdash; How the SM Actually Issues Instructions</h1>
+    <p class="subtitle">Inside an SM, four warp schedulers issue one (or two) instructions per cycle to whichever warp is ready. Walk through warp issue rules, ILP, instruction latencies, divergence and convergence, predication, occupancy maths, and Volta's independent thread scheduling &mdash; the things that decide whether your kernel runs at peak.</p>
+
+    <div class="tags">
+        <span class="tag">Warp</span><span class="tag">Scheduler</span><span class="tag">Issue</span>
+        <span class="tag">ILP</span><span class="tag">Divergence</span><span class="tag">Predication</span>
+        <span class="tag">ITS</span><span class="tag">Occupancy</span>
+        <span class="tag">Latency</span><span class="tag">Stall</span>
+    </div>
+
+    <div class="pipeline">
+        <span class="pipeline-step">Warp</span>
+        <span class="pipeline-arrow">&rarr;</span>
+        <span class="pipeline-step">Scheduler</span>
+        <span class="pipeline-arrow">&rarr;</span>
+        <span class="pipeline-step">Issue</span>
+        <span class="pipeline-arrow">&rarr;</span>
+        <span class="pipeline-step">Execute</span>
+        <span class="pipeline-arrow">&rarr;</span>
+        <span class="pipeline-step">Writeback</span>
+        <span class="pipeline-arrow">&rarr;</span>
+        <span class="pipeline-step">Stall</span>
+        <span class="pipeline-arrow">&rarr;</span>
+        <span class="pipeline-step">ITS</span>
+    </div>
+</header>
+
+<section class="slide" id="slide-00">
+    <div class="slide-number">00</div>
+    <h2>Topics We'll Cover</h2>
+    <p>The micro-architecture of warp issue: how the SM picks one warp out of dozens each cycle, why the picks decide your kernel's runtime, and the mental models that turn occupancy and divergence from mysteries into arithmetic.</p>
+    <ul class="contents-list">
+        <li><a href="#slide-01">The Warp &mdash; 32 Threads, One Program Counter (Mostly)</a></li>
+        <li><a href="#slide-02">SM Partitions and Schedulers</a></li>
+        <li><a href="#slide-03">The Issue Rule</a></li>
+        <li><a href="#slide-04">Instruction Latencies (Approximate)</a></li>
+        <li><a href="#slide-05">Occupancy &amp; ILP &mdash; Two Ways to Hide Latency</a></li>
+        <li><a href="#slide-06">Divergence &amp; Re-convergence</a></li>
+        <li><a href="#slide-07">Predication vs Branching</a></li>
+        <li><a href="#slide-08">Independent Thread Scheduling (Volta+)</a></li>
+        <li><a href="#slide-09">Occupancy Maths &mdash; Worked Out</a></li>
+        <li><a href="#slide-10">Common Stall Patterns and Cures</a></li>
+        <li><a href="#slide-11">Interactive: Issue-Rate Predictor</a></li>
+    </ul>
+</section>
+
+<section class="slide" id="slide-01">
+    <div class="slide-number">01</div>
+    <h2>The Warp &mdash; 32 Threads, One Program Counter (Mostly)</h2>
+    <p>A <strong>warp</strong> is the unit of scheduling on an NVIDIA SM: 32 threads grouped together, historically sharing a single program counter and executing the same instruction in lockstep. This is the &ldquo;Single-Instruction, Multiple-Thread&rdquo; (SIMT) model &mdash; the SM fetches one instruction and broadcasts it to all 32 lanes, each holding a different thread's register state.</p>
+    <p>Volta (2017) changed the deal: it gave <strong>each thread its own PC and call stack</strong> so that re-convergence after divergence works automatically and starvation-free. But warps still <em>issue</em> at warp granularity for performance; divergent warps are slower, not broken.</p>
+
+    <div class="canvas-wrap">
+        <svg viewBox="0 0 720 220" width="720" height="220" xmlns="http://www.w3.org/2000/svg">
+            <style>
+                .lane { fill: #161b22; stroke: #30363d; }
+                .laneA{ fill: rgba(118,185,0,0.35); stroke: #76B900; }
+                .laneM{ fill: rgba(255,166,87,0.25); stroke: #ffa657; }
+                .laneI{ fill: rgba(139,148,158,0.15); stroke: #30363d; stroke-dasharray: 3 3; }
+                .t   { fill: #e6edf3; font-family: 'JetBrains Mono', monospace; font-size: 10px; }
+                .t2  { fill: #8b949e; font-family: 'JetBrains Mono', monospace; font-size: 10px; }
+                .h   { fill: #76B900; font-family: 'Space Grotesk', sans-serif; font-weight: 600; font-size: 13px; }
+                .br  { fill: #e6edf3; font-family: 'JetBrains Mono', monospace; font-size: 11px; font-weight: 700; }
+            </style>
+            <text x="10" y="18" class="h">One warp instruction broadcast to 32 lanes</text>
+
+            <rect x="10" y="32" width="700" height="36" fill="#0d1117" stroke="#21262d"/>
+            <text x="20" y="55" class="br">FFMA  R4, R0, R1, R2   (PC = 0x1820)</text>
+
+            <text x="10" y="92" class="t2">lane 0..31 &rarr;</text>
+            <g>
+                <!-- 32 lanes -->
+                <g id="lanes"></g>
+            </g>
+
+            <!-- Draw 32 lane boxes; first row active, second row predicated-off pattern -->
+            <g>
+                <!-- Active row (all 32 lanes active) -->
+                <g>
+                    <!-- generated below by repeated rects, drawn manually for portability -->
+                </g>
+            </g>
+
+            <!-- All-active row -->
+            <g transform="translate(10,100)">
+                <text x="-2" y="-2" class="t2">all active:</text>
+                <!-- 32 small rects, 20px wide -->
+                <g>
+                    <rect x="0"   y="0" width="18" height="18" class="laneA"/>
+                    <rect x="22"  y="0" width="18" height="18" class="laneA"/>
+                    <rect x="44"  y="0" width="18" height="18" class="laneA"/>
+                    <rect x="66"  y="0" width="18" height="18" class="laneA"/>
+                    <rect x="88"  y="0" width="18" height="18" class="laneA"/>
+                    <rect x="110" y="0" width="18" height="18" class="laneA"/>
+                    <rect x="132" y="0" width="18" height="18" class="laneA"/>
+                    <rect x="154" y="0" width="18" height="18" class="laneA"/>
+                    <rect x="176" y="0" width="18" height="18" class="laneA"/>
+                    <rect x="198" y="0" width="18" height="18" class="laneA"/>
+                    <rect x="220" y="0" width="18" height="18" class="laneA"/>
+                    <rect x="242" y="0" width="18" height="18" class="laneA"/>
+                    <rect x="264" y="0" width="18" height="18" class="laneA"/>
+                    <rect x="286" y="0" width="18" height="18" class="laneA"/>
+                    <rect x="308" y="0" width="18" height="18" class="laneA"/>
+                    <rect x="330" y="0" width="18" height="18" class="laneA"/>
+                    <rect x="352" y="0" width="18" height="18" class="laneA"/>
+                    <rect x="374" y="0" width="18" height="18" class="laneA"/>
+                    <rect x="396" y="0" width="18" height="18" class="laneA"/>
+                    <rect x="418" y="0" width="18" height="18" class="laneA"/>
+                    <rect x="440" y="0" width="18" height="18" class="laneA"/>
+                    <rect x="462" y="0" width="18" height="18" class="laneA"/>
+                    <rect x="484" y="0" width="18" height="18" class="laneA"/>
+                    <rect x="506" y="0" width="18" height="18" class="laneA"/>
+                    <rect x="528" y="0" width="18" height="18" class="laneA"/>
+                    <rect x="550" y="0" width="18" height="18" class="laneA"/>
+                    <rect x="572" y="0" width="18" height="18" class="laneA"/>
+                    <rect x="594" y="0" width="18" height="18" class="laneA"/>
+                    <rect x="616" y="0" width="18" height="18" class="laneA"/>
+                    <rect x="638" y="0" width="18" height="18" class="laneA"/>
+                    <rect x="660" y="0" width="18" height="18" class="laneA"/>
+                    <rect x="682" y="0" width="18" height="18" class="laneA"/>
+                </g>
+            </g>
+
+            <!-- Divergent row (some predicated off) -->
+            <g transform="translate(10,140)">
+                <text x="-2" y="-2" class="t2">predicated (if branch took 18 lanes):</text>
+                <g>
+                    <rect x="0"   y="6" width="18" height="18" class="laneA"/>
+                    <rect x="22"  y="6" width="18" height="18" class="laneA"/>
+                    <rect x="44"  y="6" width="18" height="18" class="laneI"/>
+                    <rect x="66"  y="6" width="18" height="18" class="laneA"/>
+                    <rect x="88"  y="6" width="18" height="18" class="laneI"/>
+                    <rect x="110" y="6" width="18" height="18" class="laneA"/>
+                    <rect x="132" y="6" width="18" height="18" class="laneA"/>
+                    <rect x="154" y="6" width="18" height="18" class="laneI"/>
+                    <rect x="176" y="6" width="18" height="18" class="laneA"/>
+                    <rect x="198" y="6" width="18" height="18" class="laneA"/>
+                    <rect x="220" y="6" width="18" height="18" class="laneI"/>
+                    <rect x="242" y="6" width="18" height="18" class="laneA"/>
+                    <rect x="264" y="6" width="18" height="18" class="laneA"/>
+                    <rect x="286" y="6" width="18" height="18" class="laneI"/>
+                    <rect x="308" y="6" width="18" height="18" class="laneA"/>
+                    <rect x="330" y="6" width="18" height="18" class="laneA"/>
+                    <rect x="352" y="6" width="18" height="18" class="laneI"/>
+                    <rect x="374" y="6" width="18" height="18" class="laneA"/>
+                    <rect x="396" y="6" width="18" height="18" class="laneA"/>
+                    <rect x="418" y="6" width="18" height="18" class="laneI"/>
+                    <rect x="440" y="6" width="18" height="18" class="laneA"/>
+                    <rect x="462" y="6" width="18" height="18" class="laneA"/>
+                    <rect x="484" y="6" width="18" height="18" class="laneI"/>
+                    <rect x="506" y="6" width="18" height="18" class="laneA"/>
+                    <rect x="528" y="6" width="18" height="18" class="laneA"/>
+                    <rect x="550" y="6" width="18" height="18" class="laneI"/>
+                    <rect x="572" y="6" width="18" height="18" class="laneA"/>
+                    <rect x="594" y="6" width="18" height="18" class="laneA"/>
+                    <rect x="616" y="6" width="18" height="18" class="laneI"/>
+                    <rect x="638" y="6" width="18" height="18" class="laneA"/>
+                    <rect x="660" y="6" width="18" height="18" class="laneI"/>
+                    <rect x="682" y="6" width="18" height="18" class="laneA"/>
+                </g>
+            </g>
+
+            <text x="10" y="200" class="t2">Solid green: lane executes &amp; writes back. Hatched grey: lane idles for this issue (slot still spent).</text>
+        </svg>
+    </div>
+
+    <h3>SIMT vs SIMD &mdash; the precise difference</h3>
+    <ul>
+        <li><strong>SIMD</strong> (CPU AVX-512, ARM SVE): one instruction operates on a vector register; lanes have no per-lane PC, no per-lane control flow.</li>
+        <li><strong>SIMT</strong>: each thread keeps its own register state, and Volta+ each its own PC. The compiler emits scalar-looking code; the hardware bundles 32 threads at issue time. Predication and reconvergence handle divergence transparently.</li>
+        <li>The practical consequence: you write a per-thread C++ kernel, but you must <em>think</em> in warps. A 32-thread warp that touches 32 different cache lines costs 32 transactions; a coalesced one costs 1.</li>
+    </ul>
+
+    <div class="callout">
+        <div class="callout-label">Why 32?</div>
+        <p>Thirty-two has been the warp size on every NVIDIA architecture from Tesla (2006) to Blackwell (2025). It is wide enough to amortise control overhead and hit one cache line per warp on a 128-byte coalesced load (4 bytes &times; 32 = 128 B), and narrow enough to keep the register file and operand network manageable. Changing it would break every CUDA binary ever shipped, so it is effectively a constant of the universe.</p>
+    </div>
+</section>
+
+<section class="slide" id="slide-02">
+    <div class="slide-number">02</div>
+    <h2>SM Partitions and Schedulers</h2>
+    <p>From Volta onwards an SM is split into <strong>4 partitions</strong> (also called &ldquo;sub-cores&rdquo; or &ldquo;processing blocks&rdquo;). Each partition is essentially its own little SIMT machine, with one warp scheduler that handles a private pool of warps and feeds private functional units.</p>
+
+    <div class="diagram-grid cols-2">
+        <div class="diagram-panel accent-border">
+            <h4>Per partition (Ampere SM)</h4>
+            <ul>
+                <li>1 warp scheduler &amp; dispatcher</li>
+                <li>16 FP32 + 16 INT32 cores</li>
+                <li>1 tensor core (3rd / 4th gen on Ampere/Hopper)</li>
+                <li>1 SFU (sin, exp, rcp, rsqrt)</li>
+                <li>1 LD/ST unit set</li>
+                <li>16 K &times; 32-bit register file slice (= 64 KB)</li>
+                <li>L0 instruction cache</li>
+            </ul>
+        </div>
+        <div class="diagram-panel accent-border">
+            <h4>Per SM totals</h4>
+            <ul>
+                <li>4 partitions &rarr; 4 schedulers &rarr; <strong>4 instructions/SM/cycle</strong></li>
+                <li>64 FP32 + 64 INT32 cores (Ampere; Ada/Hopper similar; GA10x/AD102 dual-issue FP32 doubles FP32 to 128/SM)</li>
+                <li>4 tensor cores</li>
+                <li>4 SFUs, 4 LD/ST groups</li>
+                <li>64 K &times; 32-bit (= 256 KB) register file</li>
+                <li>Shared L1 / SMEM (128&ndash;228 KB) and L1-I cache</li>
+            </ul>
+        </div>
+    </div>
+
+    <h3>One Ampere SM partition, drawn out</h3>
+    <div class="canvas-wrap">
+        <svg viewBox="0 0 720 280" width="720" height="280" xmlns="http://www.w3.org/2000/svg">
+            <style>
+                .blk  { fill: #161b22; stroke: #30363d; }
+                .blkA { fill: rgba(118,185,0,0.12); stroke: #76B900; }
+                .blkB { fill: rgba(210,168,255,0.12); stroke: #d2a8ff; }
+                .blkC { fill: rgba(255,166,87,0.12); stroke: #ffa657; }
+                .ti   { fill: #e6edf3; font-family: 'Space Grotesk', sans-serif; font-weight: 600; font-size: 12px; }
+                .ts   { fill: #8b949e; font-family: 'JetBrains Mono', monospace; font-size: 10px; }
+                .h    { fill: #76B900; font-family: 'Space Grotesk', sans-serif; font-weight: 600; font-size: 13px; }
+            </style>
+            <text x="10" y="18" class="h">SM partition (1 of 4)</text>
+
+            <rect x="10"  y="30"  width="700" height="40" class="blkA"/>
+            <text x="20"  y="48"  class="ti">L0 instruction cache</text>
+            <text x="20"  y="62"  class="ts">fetched lines for this partition's warps</text>
+
+            <rect x="10"  y="80"  width="700" height="40" class="blkA"/>
+            <text x="20"  y="98"  class="ti">Warp scheduler &amp; dispatcher (16 resident warps max)</text>
+            <text x="20"  y="112" class="ts">picks 1 ready warp / cycle, dispatches up to 1 instruction (some arch dual-issue FP32)</text>
+
+            <rect x="10"  y="130" width="700" height="40" class="blkB"/>
+            <text x="20"  y="148" class="ti">Register file slice &mdash; 16K &times; 32-bit = 64 KB</text>
+            <text x="20"  y="162" class="ts">read 3 source operands / cycle through the operand collector network</text>
+
+            <rect x="10"  y="170" width="160" height="50" class="blk"/>
+            <text x="20"  y="190" class="ti">16 &times; FP32 cores</text>
+            <text x="20"  y="204" class="ts">FFMA, FADD, FMUL</text>
+
+            <rect x="180" y="170" width="160" height="50" class="blk"/>
+            <text x="190" y="190" class="ti">16 &times; INT32 cores</text>
+            <text x="190" y="204" class="ts">IADD3, IMAD, ISETP</text>
+
+            <rect x="350" y="170" width="120" height="50" class="blkC"/>
+            <text x="360" y="190" class="ti">1 &times; tensor core</text>
+            <text x="360" y="204" class="ts">HMMA / WGMMA</text>
+
+            <rect x="480" y="170" width="100" height="50" class="blk"/>
+            <text x="490" y="190" class="ti">1 &times; SFU</text>
+            <text x="490" y="204" class="ts">sin/exp/rcp</text>
+
+            <rect x="590" y="170" width="120" height="50" class="blk"/>
+            <text x="600" y="190" class="ti">LD/ST unit</text>
+            <text x="600" y="204" class="ts">SMEM / L1 / global</text>
+
+            <rect x="10"  y="230" width="700" height="36" class="blkA"/>
+            <text x="20"  y="252" class="ti">Shared with rest of SM &rarr; L1/SMEM (128&ndash;228 KB), L1-I, MIO crossbar</text>
+        </svg>
+    </div>
+
+    <h3>Issue rate, drawn at SM and GPU scope</h3>
+    <ul>
+        <li><strong>Per partition:</strong> 1 instruction / cycle (some Ada/Ampere consumer SKUs effectively 2 FP32 ops/cycle thanks to dual-issue FP32, but only one <em>scheduler slot</em>).</li>
+        <li><strong>Per SM:</strong> 4 instructions / cycle.</li>
+        <li><strong>Per H100:</strong> 4 IPC &times; 132 SMs = <strong>528 issued instructions per cycle</strong>. At 1.83 GHz that is ~0.97 trillion warp-instructions/s, of which any one HMMA represents many tensor-core math ops.</li>
+        <li>The SM is the smallest unit of scheduling work. CUDA blocks are placed onto whole SMs; warps within a block are spread roughly evenly across the four partitions when the block is launched.</li>
+    </ul>
+
+    <div class="callout">
+        <div class="callout-label">Why four partitions?</div>
+        <p>Volta's V100 introduced the 4-partition design so each scheduler could feed a tensor core without blocking the other three. It also halved the operand-collector network width compared with Pascal's two big schedulers, which made the register file faster to read and easier to lay out at high frequency. Ampere, Ada, Hopper and Blackwell all kept the four-partition layout; only the unit counts inside change.</p>
+    </div>
+</section>
+
+<section class="slide" id="slide-03">
+    <div class="slide-number">03</div>
+    <h2>The Issue Rule</h2>
+    <p>Each cycle every scheduler looks at its pool of <strong>resident warps</strong> (up to 16 per partition, so up to 64 per SM at full Volta+ occupancy) and picks one that is <em>ready</em>. &ldquo;Ready&rdquo; is a conjunction of conditions; every condition is a hardware scoreboard or pipeline status bit.</p>
+
+    <div class="table-wrap">
+        <table>
+            <thead><tr><th>Readiness check</th><th>What it means</th></tr></thead>
+            <tbody>
+                <tr><td>Instruction in L0-I</td><td>The next instruction for this warp's PC is fetched and decoded; if not, an i-cache miss stall.</td></tr>
+                <tr><td>Source registers ready</td><td>No outstanding writes to any source operand (RAW hazard tracked by per-warp scoreboard bits).</td></tr>
+                <tr><td>Functional unit free</td><td>The dispatch port for the required pipe (FP32, INT, FMA, MUFU, MIO, tensor) is not busy this cycle.</td></tr>
+                <tr><td>Predicate decoded</td><td>If predicated (<code>@P0</code>), the predicate is read; even all-false predicated instructions consume an issue slot.</td></tr>
+                <tr><td>No barrier wait</td><td><code>BAR.SYNC</code>, <code>BAR.ARV</code>, <code>__syncthreads()</code>, named barriers, async-copy barriers all parked the warp.</td></tr>
+                <tr><td>No memory dependency</td><td>If the next instruction reads a register fed by an outstanding LDG/LDS, wait for the load's scoreboard release.</td></tr>
+            </tbody>
+        </table>
+    </div>
+
+    <p>If <em>more than one</em> warp is ready, the scheduler picks one. The exact policy is undocumented and varies by architecture; it has been described as a loose round-robin biased by age and by recently-issued warps. The key invariant is &ldquo;greedy then fair&rdquo;: a warp that just got an instruction issued is not preferred next cycle.</p>
+
+    <div class="code-block">
+        <div class="code-header">Nsight Compute &mdash; warp-stall reasons sorted by frequency</div>
+        <pre><code><span class="cm"># Captured on a memory-bound GEMM kernel, A100, fp16</span>
+ncu --set full --section WarpStateStats ./gemm
+
+Section: Warp State Statistics
+&nbsp;
+Stall &mdash; Long Scoreboard          27.4 cycles/instr   <span class="cm"># LDG miss waiting on L2/HBM</span>
+Stall &mdash; Wait                     14.2 cycles/instr   <span class="cm"># dep on a fixed-latency op (FFMA)</span>
+Stall &mdash; Short Scoreboard         11.8 cycles/instr   <span class="cm"># LDS waiting on shared mem</span>
+Stall &mdash; Math Pipe Throttle        4.1 cycles/instr   <span class="cm"># FFMA pipe saturated</span>
+Stall &mdash; Drain                     3.6 cycles/instr   <span class="cm"># EXIT or BRA flushing</span>
+Stall &mdash; MIO Throttle              2.9 cycles/instr   <span class="cm"># shared-mem bank conflicts</span>
+Stall &mdash; IMC Miss                  1.3 cycles/instr   <span class="cm"># constant-cache miss</span>
+Stall &mdash; Branch Resolving          0.7 cycles/instr   <span class="cm"># indirect / divergent branch</span>
+Stall &mdash; Tex Throttle              0.2 cycles/instr   <span class="cm"># tex pipe full</span>
+Stall &mdash; Membar                    0.0 cycles/instr   <span class="cm"># fence in flight</span>
+&nbsp;
+<span class="cm"># Selected (eligible) warp count: 1.6 / cycle  &mdash; only 1.6 warps were ready,</span>
+<span class="cm"># so &ldquo;Issued&rdquo; instructions / cycle were limited even though 4 schedulers exist.</span></code></pre>
+    </div>
+
+    <div class="callout">
+        <div class="callout-label">The eligible-warp number is the one to read</div>
+        <p>Nsight Compute reports both <em>active</em> warps (resident) and <em>eligible</em> warps (ready to issue this cycle). Active &gt;&gt; eligible means there are warps but they're all stalled &mdash; classic memory-bound kernel. Active &asymp; eligible at &lt; 4 means low occupancy &mdash; classic register-pressure or small-grid kernel. You want eligible &ge; 4 sustained: at that point the schedulers are saturated and arch peaks become reachable.</p>
+    </div>
+</section>
+
+<section class="slide" id="slide-04">
+    <div class="slide-number">04</div>
+    <h2>Instruction Latencies (Approximate)</h2>
+    <p>Latency in this context means &ldquo;how many cycles after issue can a dependent instruction issue?&rdquo;. Throughput is &ldquo;how many of the same instruction can issue per cycle?&rdquo;. The SM hides latency by issuing <em>other</em> warps' instructions in the gap.</p>
+
+    <div class="table-wrap">
+        <table>
+            <thead><tr><th>Op</th><th>Latency</th><th>Notes</th></tr></thead>
+            <tbody>
+                <tr><td><code>FFMA</code> / <code>IMAD</code> / <code>IADD3</code></td><td>~4 cycles</td><td>Back-to-back FFMAs from <em>independent</em> warps issue every cycle; from one warp need ILP &ge; 4.</td></tr>
+                <tr><td><code>LDS</code> (shared load)</td><td>~30 cycles</td><td>Bank-conflict-free; with conflicts, multiply by max bank serialisation factor.</td></tr>
+                <tr><td><code>LDG</code> (global, L1 hit)</td><td>~30&ndash;90 cycles</td><td>Hits in L1 SMEM/L1 cache.</td></tr>
+                <tr><td><code>LDG</code> (global, L2 hit)</td><td>~200&ndash;300 cycles</td><td>Misses L1 but hits the SM-shared L2 (40&ndash;50 MB on Hopper, 60+ on Blackwell).</td></tr>
+                <tr><td><code>LDG</code> (global, HBM)</td><td>~400&ndash;700 cycles</td><td>Full miss; all the way to DRAM. The number that drives every occupancy decision.</td></tr>
+                <tr><td><code>HMMA</code> / <code>WGMMA</code></td><td>4&ndash;8 cycles to issue</td><td>The instruction issues quickly but the tensor-core matmul streams over many cycles; back-to-back HMMA from one warp keeps the unit fed.</td></tr>
+                <tr><td><code>ATOM.E</code> (global atomic)</td><td>~600 cycles + contention</td><td>Conflicts serialise; uncontended atomics on L2 atomics units run faster.</td></tr>
+                <tr><td><code>MUFU.SIN</code>, <code>MUFU.EXP</code>, <code>MUFU.RCP</code></td><td>~12&ndash;30 cycles</td><td>SFU; 4&times; lower throughput than FFMA.</td></tr>
+                <tr><td><code>BAR.SYNC</code> (<code>__syncthreads</code>)</td><td>variable</td><td>All warps in the block must reach the barrier; cost = arrival skew.</td></tr>
+            </tbody>
+        </table>
+    </div>
+
+    <h3>The latency-hiding rule of thumb</h3>
+    <p>To hide an op of latency L cycles when its throughput is 1/cycle, you need L independent in-flight instances. With one warp giving one instance per cycle (back-to-back), that is L resident warps with at least one ready instruction each, or fewer warps with ILP &ge; L.</p>
+    <ul>
+        <li><strong>FFMA, L=4:</strong> 4 ready warps per partition trivially saturate the FP32 pipe.</li>
+        <li><strong>LDS, L=30:</strong> ~30 in-flight loads per partition needed. At 1 warp per LDS that is 30 warps &mdash; nearly the full 16-warp pool plus some ILP.</li>
+        <li><strong>LDG to HBM, L=600:</strong> hopeless to hide with warp count alone. Solve it with prefetch (<code>cp.async</code>), wider tiles, and software pipelining of compute over loads.</li>
+    </ul>
+
+    <div class="callout">
+        <div class="callout-label">Bandwidth, not latency, sets the ceiling</div>
+        <p>HBM-load latency &times; required bandwidth = how many warps you must keep busy. On H100 with 3.35 TB/s HBM and ~600-cycle load latency at 1.83 GHz, the minimum in-flight bytes to saturate bandwidth is roughly bandwidth &times; latency &asymp; 1.1 MB. Divide by your access size (often 16 B/thread &times; 32 = 512 B/warp) and you get the warp-load count target. Below it you are leaving HBM idle.</p>
+    </div>
+</section>
+
+<section class="slide" id="slide-05">
+    <div class="slide-number">05</div>
+    <h2>Occupancy &amp; ILP &mdash; Two Ways to Hide Latency</h2>
+    <p>The scheduler keeps the SM busy by always finding <em>something</em> ready to issue. There are two complementary ways to give it work:</p>
+
+    <div class="diagram-grid cols-2">
+        <div class="diagram-panel accent-border">
+            <h4>High occupancy (TLP)</h4>
+            <p>Many resident warps (high <em>thread-level parallelism</em>). Each warp may have only one in-flight instruction at a time, but with 16 warps per partition the scheduler always has someone ready. Classic CUDA wisdom from Pascal/Volta.</p>
+            <ul>
+                <li>Pro: simple, robust.</li>
+                <li>Con: pressures the register file (more warps &rarr; fewer regs/thread); pressures shared memory (more blocks &rarr; less SMEM/block).</li>
+            </ul>
+        </div>
+        <div class="diagram-panel accent-border">
+            <h4>High ILP</h4>
+            <p>Few warps, but each warp has multiple <em>independent</em> instructions in flight. The scheduler can issue from the same warp on consecutive cycles. Volta+ encourages this: a wider register file and <code>LDG.E.128</code> (16 B/thread) lets one warp keep a partition busy.</p>
+            <ul>
+                <li>Pro: more registers per thread &rarr; bigger tiles &rarr; better arithmetic intensity.</li>
+                <li>Con: requires unrolling and explicit prefetch in source.</li>
+            </ul>
+        </div>
+    </div>
+
+    <p>Both tactics are valid and modern CUTLASS / cuBLASLt kernels lean heavily on <strong>ILP</strong> rather than chasing 100% occupancy. Volta-and-later kernels often deliver near-peak FLOPS at 25&ndash;50% occupancy because they pack four independent FFMAs and two prefetches into each warp's loop body.</p>
+
+    <h3>Two implementations of the same SAXPY-like kernel</h3>
+    <div class="code-block">
+        <div class="code-header">a) High occupancy, low ILP &mdash; older &ldquo;128 threads, 1 elt/thread&rdquo; style</div>
+        <pre><code><span class="kw">__global__</span> <span class="kw">void</span> <span class="fn">saxpy_high_occ</span>(<span class="type">float</span> a, <span class="type">const float</span>* x, <span class="type">float</span>* y, <span class="type">int</span> n)
+{
+    <span class="type">int</span> i = <span class="kw">blockIdx</span>.x * <span class="kw">blockDim</span>.x + <span class="kw">threadIdx</span>.x;
+    <span class="kw">if</span> (i &lt; n) y[i] = a * x[i] + y[i];
+}
+<span class="cm">// Launch: 256 threads/block, 32 regs/thread &rarr; 8 blocks/SM = 64 warps/SM = 100% occ.</span>
+<span class="cm">// One LDG, one FFMA, one STG per thread. Per-warp ILP = 1.</span></code></pre>
+    </div>
+    <div class="code-block">
+        <div class="code-header">b) Low occupancy, high ILP &mdash; Volta-tuned &ldquo;1 warp does 4 elements per iter&rdquo;</div>
+        <pre><code><span class="kw">__global__</span> <span class="kw">void</span> <span class="fn">saxpy_high_ilp</span>(<span class="type">float</span> a, <span class="type">const float4</span>* x4, <span class="type">float4</span>* y4, <span class="type">int</span> n4)
+{
+    <span class="type">int</span> i = <span class="kw">blockIdx</span>.x * <span class="kw">blockDim</span>.x + <span class="kw">threadIdx</span>.x;
+    <span class="kw">if</span> (i &gt;= n4) <span class="kw">return</span>;
+    <span class="cm">// 128-bit load: one LDG.E.128 brings 16 bytes/thread &rarr; 512 B/warp aligned</span>
+    <span class="type">float4</span> xv = x4[i];
+    <span class="type">float4</span> yv = y4[i];
+    yv.x = a * xv.x + yv.x;
+    yv.y = a * xv.y + yv.y;
+    yv.z = a * xv.z + yv.z;
+    yv.w = a * xv.w + yv.w;   <span class="cm">// 4 independent FFMAs per warp per loop iter</span>
+    y4[i] = yv;
+}
+<span class="cm">// Launch: 128 threads/block, 64 regs/thread &rarr; 4 blocks/SM = 16 warps/SM = 25% occ.</span>
+<span class="cm">// Per-warp ILP = 4 FFMAs; one wide LDG hides &mdash; achieves 95+% of memory peak.</span></code></pre>
+    </div>
+
+    <div class="callout">
+        <div class="callout-label">The Volta inflection</div>
+        <p>Pre-Volta the dominant guidance was &ldquo;chase occupancy.&rdquo; Volta widened the per-warp register footprint to 255 regs/thread, doubled the partition register file, and added wide loads. From Volta onwards, the highest-throughput kernels are typically 25&ndash;50% occupancy with deep ILP, not 100% with one elt/thread. CUTLASS, cuBLAS, FlashAttention all run that way.</p>
+    </div>
+</section>
+
+<section class="slide" id="slide-06">
+    <div class="slide-number">06</div>
+    <h2>Divergence &amp; Re-convergence</h2>
+    <p>When threads in a warp take different paths through an <code>if</code>/<code>else</code>, the warp <em>diverges</em>. The hardware tracks per-lane activity with an <strong>active mask</strong>; the warp issues the if-branch with one mask, then the else-branch with the inverse, both serialised. After the branches re-meet at the immediate post-dominator, they reconverge and the active mask returns to all-ones.</p>
+
+    <div class="diagram-grid cols-2">
+        <div class="diagram-panel accent-border">
+            <h4>Pre-Volta (Pascal and earlier)</h4>
+            <p>One PC per warp. The compiler emits <code>SSY</code> (set sync) to mark the IPDOM and <code>.S</code>-suffixed branches that pop the convergence stack. Lanes in the not-taken branch are idle but cannot run anything else &mdash; they wait. Reconvergence is <em>guaranteed at the IPDOM</em> but starvation is possible if a lane never gets to make progress.</p>
+            <p>Consequence: a lane holding a lock cannot release it while sibling lanes spin waiting. Inter-thread mutual exclusion within a warp is fundamentally broken.</p>
+        </div>
+        <div class="diagram-panel accent-border">
+            <h4>Volta and later (ITS)</h4>
+            <p>Each thread has its own PC and its own call stack. The compiler emits <code>BSSY</code>/<code>BSYNC</code> SASS pairs which set up a re-convergence point but do <em>not</em> force lockstep. The scheduler may interleave the two divergent halves of the warp at <em>instruction granularity</em>. Lanes can make independent forward progress; mutual exclusion within a warp is now possible.</p>
+        </div>
+    </div>
+
+    <div class="canvas-wrap">
+        <svg viewBox="0 0 720 220" width="720" height="220" xmlns="http://www.w3.org/2000/svg">
+            <style>
+                .step{ fill: #161b22; stroke: #30363d; }
+                .stepA{ fill: rgba(118,185,0,0.35); stroke: #76B900; }
+                .stepB{ fill: rgba(210,168,255,0.35); stroke: #d2a8ff; }
+                .stepI{ fill: rgba(139,148,158,0.18); stroke: #30363d; stroke-dasharray: 3 3; }
+                .t   { fill: #e6edf3; font-family: 'JetBrains Mono', monospace; font-size: 10px; }
+                .tl  { fill: #e6edf3; font-family: 'JetBrains Mono', monospace; font-size: 11px; font-weight: 700; }
+                .ts  { fill: #8b949e; font-family: 'JetBrains Mono', monospace; font-size: 10px; }
+                .h   { fill: #76B900; font-family: 'Space Grotesk', sans-serif; font-weight: 600; font-size: 13px; }
+            </style>
+            <text x="10" y="18" class="h">Time on the x-axis &mdash; pre-Volta vs Volta+ schedule of a divergent warp</text>
+
+            <!-- Pre-Volta -->
+            <text x="10" y="46" class="tl">Pre-Volta:</text>
+            <rect x="100" y="34" width="120" height="20" class="stepA"/><text x="105" y="49" class="t">if-path  (mask 0xffff0000)</text>
+            <rect x="220" y="34" width="120" height="20" class="stepI"/><text x="225" y="49" class="t">else lanes idle</text>
+            <rect x="340" y="34" width="120" height="20" class="stepI"/><text x="345" y="49" class="t">if lanes idle</text>
+            <rect x="460" y="34" width="120" height="20" class="stepB"/><text x="465" y="49" class="t">else-path (mask 0x0000ffff)</text>
+            <rect x="580" y="34" width="100" height="20" class="stepA"/><text x="585" y="49" class="t">SSY pop &mdash; reconverge</text>
+
+            <!-- Volta+ -->
+            <text x="10" y="100" class="tl">Volta+ ITS:</text>
+            <rect x="100" y="88" width="60" height="20" class="stepA"/><text x="105" y="103" class="t">if[0]</text>
+            <rect x="160" y="88" width="60" height="20" class="stepB"/><text x="165" y="103" class="t">else[0]</text>
+            <rect x="220" y="88" width="60" height="20" class="stepA"/><text x="225" y="103" class="t">if[1]</text>
+            <rect x="280" y="88" width="60" height="20" class="stepB"/><text x="285" y="103" class="t">else[1]</text>
+            <rect x="340" y="88" width="60" height="20" class="stepA"/><text x="345" y="103" class="t">if[2]</text>
+            <rect x="400" y="88" width="60" height="20" class="stepB"/><text x="405" y="103" class="t">else[2]</text>
+            <rect x="460" y="88" width="60" height="20" class="stepA"/><text x="465" y="103" class="t">if[3]</text>
+            <rect x="520" y="88" width="60" height="20" class="stepB"/><text x="525" y="103" class="t">else[3]</text>
+            <rect x="580" y="88" width="100" height="20" class="stepA"/><text x="585" y="103" class="t">BSYNC reconv.</text>
+
+            <text x="10" y="140" class="ts">Divergent warps still pay the lane-count cost &mdash; the <em>aggregate</em> work isn't reduced by ITS.</text>
+            <text x="10" y="158" class="ts">ITS only buys: forward progress for individual threads (locks!), and freedom for the scheduler to interleave the halves to hide latency better.</text>
+            <text x="10" y="180" class="ts">Crucial gotcha: code that assumed lock-step (warp-shuffle without explicit mask) <strong>broke</strong> on Volta+.</text>
+        </svg>
+    </div>
+
+    <div class="callout">
+        <div class="callout-label">The lockstep assumption is dead</div>
+        <p>Pre-Volta, programmers casually assumed that all 32 lanes execute the same instruction at the same cycle &mdash; so a <code>__shfl(x, lane)</code> &ldquo;just worked&rdquo; because every active lane was at the same PC. Volta+ may interleave divergent halves, so an unmasked <code>__shfl</code> can read garbage from a lane that hasn't reached the same instruction yet. The fix is the <code>_sync</code> family: <code>__shfl_sync(0xffffffff, x, lane)</code>. The mask both selects participating lanes and forces them to converge before the operation.</p>
+    </div>
+</section>
+
+<section class="slide" id="slide-07">
+    <div class="slide-number">07</div>
+    <h2>Predication vs Branching</h2>
+    <p>The compiler has two ways to implement an <code>if</code> in a warp:</p>
+    <ul>
+        <li><strong>Predication.</strong> Emit both sides of the branch unconditionally, but tag each instruction with a predicate register. Lanes whose predicate is false simply discard their result &mdash; the issue slot is still spent.</li>
+        <li><strong>Branching.</strong> Emit a real <code>BRA</code>. If the lanes agree (uniform branch), only one side runs. If they disagree, the warp diverges and both sides run sequentially with masks &mdash; same cost as predication, plus branch overhead.</li>
+    </ul>
+    <p>The ptxas heuristic: <strong>short branches</strong> (1&ndash;3 instructions per side) get predicated; <strong>long branches</strong> get a real branch because predication wastes too many issue slots and can hurt instruction-cache density. You can force one or the other with <code>#pragma unroll</code>, by using <code>?:</code> for short branches, and by structuring loops so the compiler sees them as uniform.</p>
+
+    <div class="table-wrap">
+        <table>
+            <thead><tr><th>Cost model</th><th>Predication</th><th>Branching (divergent)</th></tr></thead>
+            <tbody>
+                <tr><td>Issue slots spent (uniform case)</td><td>both sides</td><td>only the taken side</td></tr>
+                <tr><td>Issue slots spent (divergent case)</td><td>both sides</td><td>both sides + branch overhead</td></tr>
+                <tr><td>Front-end I-cache pressure</td><td>full inline expansion</td><td>compact code</td></tr>
+                <tr><td>Best for</td><td>1&ndash;3 instruction bodies</td><td>large bodies, often-uniform conditions</td></tr>
+            </tbody>
+        </table>
+    </div>
+
+    <h3>Worked SASS &mdash; ptxas chose predication for a tiny if/else</h3>
+    <div class="code-block">
+        <div class="code-header">CUDA source</div>
+        <pre><code><span class="kw">__device__</span> <span class="type">unsigned</span> <span class="fn">choose</span>(<span class="type">unsigned</span> a, <span class="type">unsigned</span> b)
+{
+    <span class="kw">return</span> (a &gt; b) ? a + b : a + <span class="num">0x10</span>u;
+}</code></pre>
+    </div>
+    <div class="code-block">
+        <div class="code-header">Resulting SASS (sm_80)</div>
+        <pre><code><span class="cm">// R0 = a, R1 = b</span>
+ISETP.GT.AND.U32 P0, PT, R0, R1, PT      <span class="cm">// P0 = (a &gt; b)</span>
+<span class="dir">@P0</span>  IADD3 R2, R0, R1, RZ                <span class="cm">// if-true:  R2 = a + b</span>
+<span class="dir">@!P0</span> IADD3 R2, R0, <span class="num">0x10</span>, RZ              <span class="cm">// if-false: R2 = a + 0x10</span>
+<span class="cm">// no BRA emitted &mdash; both IADD3s issue, predicates filter their commit</span></code></pre>
+    </div>
+
+    <p>Both <code>IADD3</code> instructions issue in every lane. Lanes where <code>P0</code> is false on the first instruction discard the result; the same lanes where <code>P0</code> is true on the second instruction discard <em>that</em> result. The cost is two issue slots but no divergence overhead. For three-instruction bodies it is exactly break-even with a real branch when the condition is fully divergent.</p>
+
+    <div class="callout">
+        <div class="callout-label">Loop-invariant predicates</div>
+        <p>If the predicate is loop-invariant and uniform across the warp, ptxas may hoist it: a <code>BRA.UNI</code> at the top of the loop selects the right body. Same code, no per-iteration predicate cost. Achieved by using <code>__builtin_assume</code> or by writing two specialised kernels and selecting at launch time.</p>
+    </div>
+</section>
+
+<section class="slide" id="slide-08">
+    <div class="slide-number">08</div>
+    <h2>Independent Thread Scheduling (Volta+)</h2>
+    <p>Lockstep warp execution made <strong>nested critical sections impossible to write safely</strong>. A thread holding a lock could not release it while siblings span on a sibling lock; both lanes would be pinned to the same PC, both holding their respective locks forever. Several decades of multi-threaded textbook code simply did not port to pre-Volta GPUs.</p>
+
+    <h3>Volta's promise: per-thread forward progress</h3>
+    <ul>
+        <li>Each thread owns its own PC and call stack.</li>
+        <li>The scheduler is allowed to interleave divergent halves of a warp at instruction granularity.</li>
+        <li>The hardware <strong>guarantees</strong> that every thread eventually makes forward progress (no starvation), so spin-wait + release patterns terminate.</li>
+        <li>This unlocks idiomatic concurrent code:</li>
+    </ul>
+
+    <div class="code-block">
+        <div class="code-header">A spinlock that works on Volta+ but not on Pascal</div>
+        <pre><code><span class="kw">__device__</span> <span class="type">int</span> mutex = <span class="num">0</span>;
+
+<span class="kw">__device__</span> <span class="kw">void</span> <span class="fn">acquire</span>() {
+    <span class="kw">while</span> (atomicCAS(&amp;mutex, <span class="num">0</span>, <span class="num">1</span>) != <span class="num">0</span>) { <span class="cm">/* spin */</span> }
+}
+<span class="kw">__device__</span> <span class="kw">void</span> <span class="fn">release</span>() { atomicExch(&amp;mutex, <span class="num">0</span>); }
+
+<span class="kw">__global__</span> <span class="kw">void</span> <span class="fn">k</span>(<span class="type">float</span>* shared_acc, <span class="type">float</span> v) {
+    <span class="fn">acquire</span>();
+    *shared_acc += v;       <span class="cm">// critical section</span>
+    <span class="fn">release</span>();
+    <span class="cm">// On Pascal: lanes that lost the CAS spin forever because the winning lane</span>
+    <span class="cm">// is at the same PC and cannot make progress to the release.</span>
+    <span class="cm">// On Volta+ ITS: the winner can advance to release, the loser then makes</span>
+    <span class="cm">// progress on its own retry, and the warp converges naturally.</span>
+}</code></pre>
+    </div>
+
+    <h3>The cost: explicit warp synchronisation now required</h3>
+    <p>Code that <em>relied</em> on lockstep, especially warp-level intrinsics, broke. Volta+ introduced the <code>_sync</code> family with a 32-bit mask argument: the mask names participating lanes <em>and</em> forces them to converge before the op.</p>
+
+    <div class="code-block">
+        <div class="code-header">Old vs new warp shuffle</div>
+        <pre><code><span class="cm">// Pascal era &mdash; relied on implicit lockstep</span>
+<span class="type">float</span> v = __shfl(x, lane);                       <span class="cm">// deprecated, removed in CUDA 9+</span>
+
+<span class="cm">// Volta+ era &mdash; explicit mask, explicit convergence</span>
+<span class="type">float</span> v = __shfl_sync(<span class="num">0xffffffff</span>, x, lane);     <span class="cm">// all 32 lanes participate</span>
+<span class="type">unsigned</span> mask = __activemask();                   <span class="cm">// query who is here right now</span>
+<span class="type">int</span> b      = __ballot_sync(mask, predicate);
+<span class="type">int</span> sum    = __reduce_add_sync(mask, x);          <span class="cm">// Volta+ HW reduction</span></code></pre>
+    </div>
+
+    <div class="table-wrap">
+        <table>
+            <thead><tr><th>Old (deprecated)</th><th>New _sync form</th><th>Why the change</th></tr></thead>
+            <tbody>
+                <tr><td><code>__shfl(x, lane)</code></td><td><code>__shfl_sync(mask, x, lane)</code></td><td>Force convergence on the named lanes before reading.</td></tr>
+                <tr><td><code>__ballot(p)</code></td><td><code>__ballot_sync(mask, p)</code></td><td>Same: who-voted-yes only meaningful with a defined participant set.</td></tr>
+                <tr><td><code>__any(p)</code> / <code>__all(p)</code></td><td><code>__any_sync</code> / <code>__all_sync</code></td><td>Same.</td></tr>
+                <tr><td>(implicit)</td><td><code>__syncwarp(mask)</code></td><td>Explicit warp-level barrier; cheap, no impact on block barrier.</td></tr>
+            </tbody>
+        </table>
+    </div>
+
+    <div class="callout">
+        <div class="callout-label">If your old kernel suddenly returns garbage on a Hopper</div>
+        <p>The single most common Volta-onwards porting bug is calling a non-<code>_sync</code> warp intrinsic. The compiler will warn; do not ignore the warning. Either pass <code>0xffffffff</code> (all lanes) or, if you genuinely have a divergent context, use <code>__activemask()</code> to capture the real participating set.</p>
+    </div>
+</section>
+
+<section class="slide" id="slide-09">
+    <div class="slide-number">09</div>
+    <h2>Occupancy Maths &mdash; Worked Out</h2>
+    <p>Occupancy = (resident warps per SM) / (max warps per SM). On Volta and later the cap is 64 warps/SM (= 2048 threads). The <em>actual</em> resident count is the minimum of three independent limits.</p>
+
+    <div class="table-wrap">
+        <table>
+            <thead><tr><th>Resource</th><th>Per-SM budget (Volta+)</th><th>Per-block consumption</th></tr></thead>
+            <tbody>
+                <tr><td>Registers</td><td>64 K &times; 32-bit = 256 KB</td><td>threads &times; regs/thread</td></tr>
+                <tr><td>Shared memory</td><td>100&ndash;228 KB (config split with L1)</td><td>SMEM declared by the block</td></tr>
+                <tr><td>Warps</td><td>64</td><td>ceil(threads/32)</td></tr>
+                <tr><td>Blocks</td><td>32 (Volta+, 16 on some)</td><td>1</td></tr>
+            </tbody>
+        </table>
+    </div>
+
+    <h3>Worked example A &mdash; register-bound</h3>
+    <ul>
+        <li>Block: 256 threads, 64 regs/thread.</li>
+        <li>Per-block regs: 256 &times; 64 = 16 384 regs = 16 K &rarr; <strong>4 blocks/SM</strong> fit in 64 K registers.</li>
+        <li>4 blocks &times; 256 threads = 1024 threads = 32 warps/SM = <strong>50% occupancy</strong>.</li>
+        <li>The warp limit (64) and block limit (32) are not binding here; registers are.</li>
+    </ul>
+
+    <h3>Worked example B &mdash; warp-cap-bound</h3>
+    <ul>
+        <li>Same block size, but reduce regs/thread to 32.</li>
+        <li>Per-block: 256 &times; 32 = 8 192 regs &rarr; up to 8 blocks/SM by registers alone.</li>
+        <li>But 8 &times; 256 = 2 048 threads = 64 warps &mdash; <strong>at the warp cap</strong>.</li>
+        <li>So 8 blocks &times; 256 = 64 warps = <strong>100% occupancy</strong>.</li>
+    </ul>
+
+    <h3>Worked example C &mdash; SMEM-bound</h3>
+    <ul>
+        <li>Block: 128 threads, 48 regs/thread, 48 KB SMEM/block.</li>
+        <li>Registers: 128 &times; 48 = 6 144 regs &rarr; 64K/6144 &asymp; 10 blocks; not binding.</li>
+        <li>Warps: 128/32 = 4 warps/block &rarr; warp cap allows 64/4 = 16 blocks; not binding.</li>
+        <li>SMEM: 100 KB / 48 KB = 2 blocks/SM; <strong>SMEM is binding.</strong></li>
+        <li>2 blocks &times; 4 warps = 8 warps/SM = <strong>12.5% occupancy</strong>. Probably bandwidth-bound and will need either smaller tiles or async-copy double-buffering to hit peak.</li>
+    </ul>
+
+    <div class="code-block">
+        <div class="code-header">Asking the runtime instead of doing the maths by hand</div>
+        <pre><code><span class="kw">int</span> blocks = <span class="num">0</span>, threads_per_block = <span class="num">256</span>;
+<span class="type">size_t</span> shared_bytes = <span class="num">48</span> * <span class="num">1024</span>;
+<span class="fn">cudaOccupancyMaxActiveBlocksPerMultiprocessor</span>(
+    &amp;blocks,                       <span class="cm">// out</span>
+    my_kernel,                     <span class="cm">// kernel function pointer</span>
+    threads_per_block,             <span class="cm">// per-block thread count</span>
+    shared_bytes);                 <span class="cm">// dynamic SMEM</span>
+
+<span class="cm">// Or pick a configuration that maximises occupancy:</span>
+<span class="kw">int</span> minGrid = <span class="num">0</span>, optBlock = <span class="num">0</span>;
+<span class="fn">cudaOccupancyMaxPotentialBlockSize</span>(&amp;minGrid, &amp;optBlock,
+    my_kernel, /*dyn smem fn*/<span class="num">0</span>, /*max block*/<span class="num">1024</span>);
+
+<span class="cm">// And to query the actual achieved occupancy at run time:</span>
+<span class="kw">int</span> active = <span class="num">0</span>;
+<span class="fn">cudaOccupancyMaxActiveBlocksPerMultiprocessorWithFlags</span>(
+    &amp;active, my_kernel, threads_per_block, shared_bytes,
+    cudaOccupancyDefault);</code></pre>
+    </div>
+
+    <div class="callout">
+        <div class="callout-label">Higher occupancy is not always faster</div>
+        <p>Beyond the point where the schedulers are saturated, more warps don't help &mdash; and they cost you registers/thread, which forces wider tiles to spill to L1, which costs bandwidth. Many production kernels (CUTLASS GEMM tiles, FlashAttention) target 25&ndash;50% occupancy on purpose. Use Nsight Compute to read the &ldquo;eligible warps per cycle&rdquo; metric: if it is &ge; 4 sustained, occupancy is enough.</p>
+    </div>
+</section>
+
+<section class="slide" id="slide-10">
+    <div class="slide-number">10</div>
+    <h2>Common Stall Patterns and Cures</h2>
+    <p>Nsight Compute names ten or so warp-stall reasons. Most kernels show one or two dominant ones; once you know which, the cure is usually mechanical.</p>
+
+    <div class="table-wrap">
+        <table>
+            <thead><tr><th>Stall reason</th><th>Symptom</th><th>Cure</th></tr></thead>
+            <tbody>
+                <tr>
+                    <td><strong>Long Scoreboard</strong> (memory dependency)</td>
+                    <td>Waiting on outstanding LDG / LDG.E / LDS to retire.</td>
+                    <td>Bigger tiles to reuse loaded data; <code>cp.async</code> + <code>cp.async.commit</code> double-buffer; raise occupancy if low; check coalescing.</td>
+                </tr>
+                <tr>
+                    <td><strong>Wait</strong> (execution dependency)</td>
+                    <td>Fixed-latency op (FFMA, IMAD, HMMA) feeding the next instruction; not enough independent work.</td>
+                    <td>Unroll loops for ILP, reduce regs/thread to fit more warps, interleave independent accumulators.</td>
+                </tr>
+                <tr>
+                    <td><strong>Barrier</strong> (<code>__syncthreads</code>)</td>
+                    <td>One warp waiting for siblings to reach the barrier.</td>
+                    <td>Use <code>cuda::barrier</code> + named barriers (Hopper); switch heavy load/compute to <code>cp.async</code>; reduce SMEM-traffic skew.</td>
+                </tr>
+                <tr>
+                    <td><strong>MIO Throttle</strong></td>
+                    <td>Memory I/O subsystem (SMEM bank conflicts, atomics, surface ops) saturated.</td>
+                    <td>Pad shared arrays to break bank conflicts; coalesce; replace atomics with reductions.</td>
+                </tr>
+                <tr>
+                    <td><strong>IMC Throttle</strong> (Issue/Math throttle)</td>
+                    <td>Warp scheduler can't issue more of the dominant pipe; back-to-back FFMAs from the same warp.</td>
+                    <td>Mix instruction types (FP + INT + LDS), increase warp count, schedule independent accumulators.</td>
+                </tr>
+                <tr>
+                    <td><strong>Tex Throttle</strong></td>
+                    <td>Texture pipe saturated by <code>TEX</code>/<code>TLD</code> ops.</td>
+                    <td>Use plain <code>LDG</code>/<code>LDS</code> when the texture filtering isn't actually needed.</td>
+                </tr>
+                <tr>
+                    <td><strong>Math Pipe Throttle</strong> (FP / DP / SFU)</td>
+                    <td>The corresponding pipe is full every cycle.</td>
+                    <td>Stagger instruction types; for SFU-heavy code, replace with polynomial approximations or reorder.</td>
+                </tr>
+                <tr>
+                    <td><strong>Drain</strong></td>
+                    <td><code>EXIT</code> or branch-resolving flush at end of warp.</td>
+                    <td>Usually benign; large blocks tail more. Consider persistent kernels for very small grids.</td>
+                </tr>
+                <tr>
+                    <td><strong>Branch Resolving</strong></td>
+                    <td>Indirect or divergent branch waiting on the resolution unit.</td>
+                    <td>Make branches uniform; precompute targets; predicate when bodies are short.</td>
+                </tr>
+            </tbody>
+        </table>
+    </div>
+
+    <div class="callout">
+        <div class="callout-label">Triage script</div>
+        <p>If <em>Long Scoreboard</em> dominates &gt; 30% of cycles, you are memory-bound &mdash; tile bigger and async-copy. If <em>Wait</em> dominates, you are ILP-bound &mdash; unroll. If <em>MIO Throttle</em> dominates, your shared-memory access pattern has bank conflicts &mdash; pad arrays. If <em>Math Pipe Throttle</em> dominates, you are doing well &mdash; you are at the arch's compute peak. The other reasons rarely dominate in well-formed code.</p>
+    </div>
+</section>
+
+<section class="slide" id="slide-11">
+    <div class="slide-number">11</div>
+    <h2>Interactive: Issue-Rate Predictor</h2>
+    <p>Pick a GPU class and your block size / register pressure / shared memory. The predictor computes the binding limit and estimates achievable IPC plus a likely dominant stall.</p>
+
+    <div class="control-panel">
+        <div class="control-row">
+            <label for="ip-gpu">GPU class</label>
+            <select id="ip-gpu">
+                <option value="v100">V100 (Volta) &mdash; 80 SMs, 64 warps/SM, 96 KB SMEM</option>
+                <option value="a100" selected>A100 (Ampere) &mdash; 108 SMs, 64 warps/SM, 164 KB SMEM</option>
+                <option value="h100">H100 (Hopper) &mdash; 132 SMs, 64 warps/SM, 228 KB SMEM</option>
+                <option value="rtx4090">RTX 4090 (Ada) &mdash; 128 SMs, 48 warps/SM, 100 KB SMEM</option>
+                <option value="b200">B200 (Blackwell) &mdash; 148 SMs, 64 warps/SM, 228 KB SMEM</option>
+            </select>
+        </div>
+        <div class="control-row">
+            <label for="ip-tpb">Threads / block</label>
+            <input id="ip-tpb" type="range" min="32" max="1024" step="32" value="256">
+            <span class="val" id="ip-tpb-v">256</span>
+        </div>
+        <div class="control-row">
+            <label for="ip-rpt">Registers / thread</label>
+            <input id="ip-rpt" type="range" min="16" max="256" step="16" value="64">
+            <span class="val" id="ip-rpt-v">64</span>
+        </div>
+        <div class="control-row">
+            <label for="ip-smem">Shared memory / block (KB)</label>
+            <input id="ip-smem" type="range" min="0" max="228" step="4" value="0">
+            <span class="val" id="ip-smem-v">0 KB</span>
+        </div>
+
+        <div class="metric-grid">
+            <div class="metric"><div class="metric-label">Blocks/SM</div><div class="metric-value" id="ip-bpsm">—</div></div>
+            <div class="metric"><div class="metric-label">Warps/SM</div><div class="metric-value" id="ip-wpsm">—</div></div>
+            <div class="metric"><div class="metric-label">Occupancy</div><div class="metric-value" id="ip-occ">—</div></div>
+            <div class="metric"><div class="metric-label">IPC (est.)</div><div class="metric-value" id="ip-ipc">—</div></div>
+            <div class="metric"><div class="metric-label">SM-wide IPC</div><div class="metric-value" id="ip-smipc">—</div></div>
+            <div class="metric"><div class="metric-label">Likely stall</div><div class="metric-value" id="ip-stall">—</div></div>
+        </div>
+
+        <div id="ip-out" class="result-box"></div>
+    </div>
+
+    <script>
+    (function(){
+        const gpus = {
+            v100:    { name:'V100',     sms: 80, maxWarps: 64, maxBlocks: 32, regsPerSM: 65536, smemKB: 96  },
+            a100:    { name:'A100',     sms:108, maxWarps: 64, maxBlocks: 32, regsPerSM: 65536, smemKB: 164 },
+            h100:    { name:'H100',     sms:132, maxWarps: 64, maxBlocks: 32, regsPerSM: 65536, smemKB: 228 },
+            rtx4090: { name:'RTX 4090', sms:128, maxWarps: 48, maxBlocks: 24, regsPerSM: 65536, smemKB: 100 },
+            b200:    { name:'B200',     sms:148, maxWarps: 64, maxBlocks: 32, regsPerSM: 65536, smemKB: 228 }
+        };
+
+        const $ = id => document.getElementById(id);
+
+        function bind(id, valId, suffix){
+            const el = $(id), v = $(valId);
+            el.addEventListener('input', () => { v.textContent = el.value + (suffix||''); update(); });
+        }
+        bind('ip-tpb','ip-tpb-v','');
+        bind('ip-rpt','ip-rpt-v','');
+        bind('ip-smem','ip-smem-v',' KB');
+        $('ip-gpu').addEventListener('change', update);
+
+        function update(){
+            const g = gpus[$('ip-gpu').value];
+            const tpb  = parseInt($('ip-tpb').value, 10);   // threads per block
+            const rpt  = parseInt($('ip-rpt').value, 10);   // regs per thread
+            const smem = parseInt($('ip-smem').value, 10);  // KB per block
+
+            const warpsPerBlock = Math.ceil(tpb / 32);
+            const regsPerBlock  = tpb * rpt;
+            const smemPerBlock  = smem;                     // KB
+
+            // Limits from each resource:
+            const blocksByRegs  = regsPerBlock > 0 ? Math.floor(g.regsPerSM / regsPerBlock) : 999;
+            const blocksByWarps = Math.floor(g.maxWarps / warpsPerBlock);
+            const blocksBySmem  = smemPerBlock > 0 ? Math.floor(g.smemKB / smemPerBlock) : 999;
+            const blocksHard    = g.maxBlocks;
+
+            const limits = [
+                { name: 'registers', val: blocksByRegs  },
+                { name: 'warp cap',  val: blocksByWarps },
+                { name: 'SMEM',      val: blocksBySmem  },
+                { name: 'block cap', val: blocksHard    }
+            ];
+            limits.sort((a,b) => a.val - b.val);
+            const blocksPerSM = Math.max(0, limits[0].val);
+            const binding     = limits[0].name;
+
+            const warpsPerSM  = blocksPerSM * warpsPerBlock;
+            const occ         = warpsPerSM / g.maxWarps;            // fraction of max warps
+
+            // Estimate IPC per partition. With 4 schedulers and >= 4 ready warps per
+            // partition we approach 1.0 IPC each. Falling below ~4 warps per
+            // partition starts costing IPC linearly. This is a stylised model.
+            const warpsPerPart = warpsPerSM / 4;
+            const ipcPart      = Math.min(1, warpsPerPart / 4);
+            const ipcSM        = ipcPart * 4;                       // up to 4 IPC / SM
+
+            // Likely stall reason heuristic
+            let stall = '—';
+            if (blocksPerSM === 0) {
+                stall = 'cannot launch (over-budget)';
+            } else if (binding === 'registers' && occ < 0.4) {
+                stall = 'register pressure';
+            } else if (binding === 'SMEM' && occ < 0.5) {
+                stall = 'SMEM pressure';
+            } else if (warpsPerPart < 2) {
+                stall = 'too few warps &rarr; Wait / Long Scoreboard';
+            } else if (warpsPerPart >= 4 && rpt < 32) {
+                stall = 'IMC / Math Pipe Throttle (saturated scheduler)';
+            } else if (occ >= 0.75) {
+                stall = 'Long Scoreboard (memory-bound)';
+            } else {
+                stall = 'mixed &mdash; check Nsight Compute';
+            }
+
+            // Update metrics
+            $('ip-bpsm').textContent  = blocksPerSM;
+            $('ip-wpsm').textContent  = warpsPerSM + ' / ' + g.maxWarps;
+            $('ip-occ').textContent   = (occ * 100).toFixed(0) + '%';
+            $('ip-ipc').textContent   = ipcPart.toFixed(2);
+            $('ip-smipc').textContent = ipcSM.toFixed(2) + ' / 4';
+            $('ip-stall').innerHTML   = stall;
+
+            // Verdict line
+            const lines = [];
+            lines.push('<div><span class="line-label">binding limit</span> &rarr; <span class="line-val">' + binding + ' (' + limits[0].val + ' blocks/SM)</span></div>');
+            lines.push('<div><span class="line-label">block footprint</span> &rarr; ' + warpsPerBlock + ' warps, ' + regsPerBlock + ' regs, ' + smemPerBlock + ' KB SMEM</div>');
+            lines.push('<div><span class="line-label">SM-wide issue ceiling</span> &rarr; ' + (ipcSM * g.sms).toFixed(0) + ' instructions / cycle across ' + g.sms + ' SMs</div>');
+
+            // Verdict / hint
+            let verdict = '';
+            if (blocksPerSM === 0) {
+                verdict = '<span class="badge bad">over budget</span> reduce regs/thread or SMEM/block to fit.';
+            } else if (binding === 'registers' && occ < 0.5) {
+                const targetReg = Math.floor(g.regsPerSM / (Math.ceil(g.maxWarps / warpsPerBlock) * tpb / 1)) ;
+                // simpler: suggest 32 regs/thread
+                const wantBlocks = Math.min(g.maxBlocks, Math.floor(g.maxWarps / warpsPerBlock));
+                const wantRegs   = Math.floor(g.regsPerSM / (wantBlocks * tpb));
+                verdict = '<span class="badge warn">register-pressure bound</span> drop regs to ~' + wantRegs + '/thread (or use <code>__launch_bounds__</code>) to hit ' + Math.round(wantBlocks * warpsPerBlock / g.maxWarps * 100) + '% occupancy.';
+            } else if (binding === 'SMEM' && occ < 0.5) {
+                verdict = '<span class="badge warn">SMEM-pressure bound</span> halve SMEM/block (split tile) or use <code>cp.async</code> double-buffering with smaller stages.';
+            } else if (warpsPerPart < 2) {
+                verdict = '<span class="badge warn">scheduler-starved</span> &lt; 2 warps per partition; expect Long Scoreboard / Wait stalls. Increase block count or threads/block.';
+            } else if (occ >= 0.75 && rpt <= 32) {
+                verdict = '<span class="badge ok">scheduler-saturated</span> consider reducing warps and increasing ILP &mdash; CUTLASS-style 25&ndash;50% occupancy with ILP &ge; 4 often wins on Volta+.';
+            } else {
+                verdict = '<span class="badge ok">balanced</span> measure with Nsight Compute &mdash; eligible warps/cycle &ge; 4 means you are at the IPC peak.';
+            }
+            lines.push('<div style="margin-top:0.5rem;">' + verdict + '</div>');
+
+            $('ip-out').innerHTML = lines.join('');
+        }
+
+        update();
+    })();
+    </script>
+</section>
+<!-- ════════════════════════════════════ Footer ════════════════════════════════════ -->
+<footer class="footer">
+    <p>Part of the <a href="https://github.com/BrendanJamesLynskey/LLMs#nvidia-gpu-architectures">NVIDIA GPU Architectures Series</a></p>
+    <p style="margin-top: 0.5rem; font-size: 0.8rem;"><a href="https://github.com/BrendanJamesLynskey/LLMs#nvidia-gpu-architectures">Back to Series Index</a></p>
+</footer>
+
+<script>
+    // Smooth scroll for TOC links
+    document.querySelectorAll('a[href^="#"]').forEach(anchor => {
+        anchor.addEventListener('click', function (e) {
+            e.preventDefault();
+            const target = document.querySelector(this.getAttribute('href'));
+            if (target) target.scrollIntoView({ behavior: 'smooth', block: 'start' });
+        });
+    });
+
+    // Subtle fade-in on scroll
+    const observer = new IntersectionObserver((entries) => {
+        entries.forEach(entry => {
+            if (entry.isIntersecting) {
+                entry.target.style.opacity = '1';
+                entry.target.style.transform = 'translateY(0)';
+            }
+        });
+    }, { threshold: 0.1 });
+    document.querySelectorAll('.slide').forEach(slide => {
+        slide.style.opacity = '0';
+        slide.style.transform = 'translateY(30px)';
+        slide.style.transition = 'opacity 0.6s ease, transform 0.6s ease';
+        observer.observe(slide);
+    });
+</script>
+
+</body>
+</html>
