@@ -1177,7 +1177,7 @@ Stall &mdash; Membar                    0.0 cycles/instr   <span class="cm"># fe
 
     <div class="callout">
         <div class="callout-label">The Volta inflection</div>
-        <p>Pre-Volta the dominant guidance was &ldquo;chase occupancy.&rdquo; Volta widened the per-warp register footprint to 255 regs/thread, doubled the partition register file, and added wide loads. From Volta onwards, the highest-throughput kernels are typically 25&ndash;50% occupancy with deep ILP, not 100% with one elt/thread. CUTLASS, cuBLAS, FlashAttention all run that way.</p>
+        <p>Pre-Volta the dominant guidance was &ldquo;chase occupancy.&rdquo; Volta kept the 255 regs/thread cap (unchanged since Kepler GK110) but reorganised the SM into four 64 KB partition register-file slices, each fed by its own scheduler, and combined that with wide loads. From Volta onwards, the highest-throughput kernels are typically 25&ndash;50% occupancy with deep ILP, not 100% with one elt/thread. CUTLASS, cuBLAS, FlashAttention all run that way.</p>
     </div>
 </section>
 
@@ -1336,7 +1336,7 @@ ISETP.GT.AND.U32 P0, PT, R0, R1, PT      <span class="cm">// P0 = (a &gt; b)</sp
 <span class="type">float</span> v = __shfl_sync(<span class="num">0xffffffff</span>, x, lane);     <span class="cm">// all 32 lanes participate</span>
 <span class="type">unsigned</span> mask = __activemask();                   <span class="cm">// query who is here right now</span>
 <span class="type">int</span> b      = __ballot_sync(mask, predicate);
-<span class="type">int</span> sum    = __reduce_add_sync(mask, x);          <span class="cm">// Volta+ HW reduction</span></code></pre>
+<span class="type">int</span> sum    = __reduce_add_sync(mask, x);          <span class="cm">// Ampere+ HW reduction (sm_80)</span></code></pre>
     </div>
 
     <div class="table-wrap">
