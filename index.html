@@ -9,15 +9,15 @@
     <link href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;500;700&family=Space+Grotesk:wght@400;500;600;700&family=Inter:wght@400;500;600&display=swap" rel="stylesheet">
     <style>
         :root {
-            --bg-primary: #0a0a0a;
-            --bg-card: #0d1117;
-            --bg-code: #161b22;
-            --text-primary: #e6edf3;
-            --text-secondary: #8b949e;
-            --accent: #76B900;
-            --accent-dim: #76B90044;
-            --accent-glow: #76B90033;
-            --border: #21262d;
+            --bg-primary: #1b1b1a;
+            --bg-card: #212120;
+            --bg-code: #292928;
+            --text-primary: #edede7;
+            --text-secondary: #9b9b95;
+            --accent: #b8b315;
+            --accent-dim: #b8b31544;
+            --accent-glow: #b8b31533;
+            --border: #363633;
             --font-display: 'Space Grotesk', sans-serif;
             --font-mono: 'JetBrains Mono', 'Fira Code', monospace;
             --font-body: 'Inter', sans-serif;
@@ -228,7 +228,7 @@
             font-family: var(--font-mono);
             font-size: 0.75rem;
             color: var(--accent);
-            background: rgba(118, 185, 0, 0.08);
+            background: rgba(184,179,21,0.08);
             padding: 0.4rem 1rem;
             border-bottom: 1px solid var(--border);
         }
@@ -243,18 +243,18 @@
             font-family: var(--font-mono);
             font-size: 0.85rem;
             line-height: 1.6;
-            color: #c9d1d9;
+            color: #d5d5cf;
         }
 
         /* Syntax highlighting (manual) */
-        .kw { color: #ff7b72; }
-        .fn { color: #d2a8ff; }
-        .str { color: #a5d6ff; }
-        .cm { color: #8b949e; font-style: italic; }
-        .num { color: #79c0ff; }
-        .type { color: #ffa657; }
-        .dir { color: #ff7b72; }
-        .mac { color: #ffa657; }
+        .kw { color: #e57d63; }
+        .fn { color: #d1c2e1; }
+        .str { color: #c9dbe2; }
+        .cm { color: #9b9b95; font-style: italic; }
+        .num { color: #afcbd8; }
+        .type { color: #e0b172; }
+        .dir { color: #e57d63; }
+        .mac { color: #e0b172; }
 
         /* ── Tables ── */
         .table-wrap {
@@ -292,7 +292,7 @@
         }
 
         tr:nth-child(even) td {
-            background: rgba(13, 17, 23, 0.5);
+            background: rgba(33,33,32,0.5);
         }
 
         /* ── Diagrams ── */
@@ -324,7 +324,7 @@
         .diagram-box.accent {
             border-color: var(--accent);
             color: var(--accent);
-            background: rgba(118, 185, 0, 0.08);
+            background: rgba(184,179,21,0.08);
         }
 
         .diagram-box.dim {
@@ -400,7 +400,7 @@
         .hierarchy-item.accent {
             border-color: var(--accent);
             color: var(--accent);
-            background: rgba(118, 185, 0, 0.08);
+            background: rgba(184,179,21,0.08);
         }
 
         /* Grid diagram */
@@ -673,7 +673,7 @@
             cursor: pointer;
             transition: background 0.15s ease;
         }
-        .btn:hover { background: rgba(118, 185, 0, 0.2); }
+        .btn:hover { background: rgba(184,179,21,0.2); }
         .btn:disabled { opacity: 0.4; cursor: not-allowed; }
         .btn.secondary {
             background: var(--bg-code);
@@ -750,8 +750,8 @@
             margin-left: 0.3rem;
         }
         .badge.ok    { border-color: var(--accent); color: var(--accent); background: var(--accent-dim); }
-        .badge.warn  { border-color: #ffa657; color: #ffa657; background: rgba(255,166,87,0.08); }
-        .badge.bad   { border-color: #ff7b72; color: #ff7b72; background: rgba(255,123,114,0.08); }
+        .badge.warn  { border-color: #e0b172; color: #e0b172; background: rgba(224,177,114,0.08); }
+        .badge.bad   { border-color: #e57d63; color: #e57d63; background: rgba(229,125,99,0.08); }
 
     </style>
 </head>
@@ -814,18 +814,18 @@
     <div class="canvas-wrap">
         <svg viewBox="0 0 720 220" width="720" height="220" xmlns="http://www.w3.org/2000/svg">
             <style>
-                .lane { fill: #161b22; stroke: #30363d; }
-                .laneA{ fill: rgba(118,185,0,0.35); stroke: #76B900; }
-                .laneM{ fill: rgba(255,166,87,0.25); stroke: #ffa657; }
-                .laneI{ fill: rgba(139,148,158,0.15); stroke: #30363d; stroke-dasharray: 3 3; }
-                .t   { fill: #e6edf3; font-family: 'JetBrains Mono', monospace; font-size: 10px; }
-                .t2  { fill: #8b949e; font-family: 'JetBrains Mono', monospace; font-size: 10px; }
-                .h   { fill: #76B900; font-family: 'Space Grotesk', sans-serif; font-weight: 600; font-size: 13px; }
-                .br  { fill: #e6edf3; font-family: 'JetBrains Mono', monospace; font-size: 11px; font-weight: 700; }
+                .lane { fill: #292928; stroke: #42423e; }
+                .laneA{ fill: rgba(184,179,21,0.35); stroke: #b8b315; }
+                .laneM{ fill: rgba(224,177,114,0.25); stroke: #e0b172; }
+                .laneI{ fill: rgba(155,155,149,0.15); stroke: #42423e; stroke-dasharray: 3 3; }
+                .t   { fill: #edede7; font-family: 'JetBrains Mono', monospace; font-size: 10px; }
+                .t2  { fill: #9b9b95; font-family: 'JetBrains Mono', monospace; font-size: 10px; }
+                .h   { fill: #b8b315; font-family: 'Space Grotesk', sans-serif; font-weight: 600; font-size: 13px; }
+                .br  { fill: #edede7; font-family: 'JetBrains Mono', monospace; font-size: 11px; font-weight: 700; }
             </style>
             <text x="10" y="18" class="h">One warp instruction broadcast to 32 lanes</text>
 
-            <rect x="10" y="32" width="700" height="36" fill="#0d1117" stroke="#21262d"/>
+            <rect x="10" y="32" width="700" height="36" fill="#212120" stroke="#363633"/>
             <text x="20" y="55" class="br">FFMA  R4, R0, R1, R2   (PC = 0x1820)</text>
 
             <text x="10" y="92" class="t2">lane 0..31 &rarr;</text>
@@ -973,13 +973,13 @@
     <div class="canvas-wrap">
         <svg viewBox="0 0 720 280" width="720" height="280" xmlns="http://www.w3.org/2000/svg">
             <style>
-                .blk  { fill: #161b22; stroke: #30363d; }
-                .blkA { fill: rgba(118,185,0,0.12); stroke: #76B900; }
-                .blkB { fill: rgba(210,168,255,0.12); stroke: #d2a8ff; }
-                .blkC { fill: rgba(255,166,87,0.12); stroke: #ffa657; }
-                .ti   { fill: #e6edf3; font-family: 'Space Grotesk', sans-serif; font-weight: 600; font-size: 12px; }
-                .ts   { fill: #8b949e; font-family: 'JetBrains Mono', monospace; font-size: 10px; }
-                .h    { fill: #76B900; font-family: 'Space Grotesk', sans-serif; font-weight: 600; font-size: 13px; }
+                .blk  { fill: #292928; stroke: #42423e; }
+                .blkA { fill: rgba(184,179,21,0.12); stroke: #b8b315; }
+                .blkB { fill: rgba(209,194,225,0.12); stroke: #d1c2e1; }
+                .blkC { fill: rgba(224,177,114,0.12); stroke: #e0b172; }
+                .ti   { fill: #edede7; font-family: 'Space Grotesk', sans-serif; font-weight: 600; font-size: 12px; }
+                .ts   { fill: #9b9b95; font-family: 'JetBrains Mono', monospace; font-size: 10px; }
+                .h    { fill: #b8b315; font-family: 'Space Grotesk', sans-serif; font-weight: 600; font-size: 13px; }
             </style>
             <text x="10" y="18" class="h">SM partition (1 of 4)</text>
 
@@ -1201,14 +1201,14 @@ Stall &mdash; Membar                    0.0 cycles/instr   <span class="cm"># fe
     <div class="canvas-wrap">
         <svg viewBox="0 0 720 220" width="720" height="220" xmlns="http://www.w3.org/2000/svg">
             <style>
-                .step{ fill: #161b22; stroke: #30363d; }
-                .stepA{ fill: rgba(118,185,0,0.35); stroke: #76B900; }
-                .stepB{ fill: rgba(210,168,255,0.35); stroke: #d2a8ff; }
-                .stepI{ fill: rgba(139,148,158,0.18); stroke: #30363d; stroke-dasharray: 3 3; }
-                .t   { fill: #e6edf3; font-family: 'JetBrains Mono', monospace; font-size: 10px; }
-                .tl  { fill: #e6edf3; font-family: 'JetBrains Mono', monospace; font-size: 11px; font-weight: 700; }
-                .ts  { fill: #8b949e; font-family: 'JetBrains Mono', monospace; font-size: 10px; }
-                .h   { fill: #76B900; font-family: 'Space Grotesk', sans-serif; font-weight: 600; font-size: 13px; }
+                .step{ fill: #292928; stroke: #42423e; }
+                .stepA{ fill: rgba(184,179,21,0.35); stroke: #b8b315; }
+                .stepB{ fill: rgba(209,194,225,0.35); stroke: #d1c2e1; }
+                .stepI{ fill: rgba(155,155,149,0.18); stroke: #42423e; stroke-dasharray: 3 3; }
+                .t   { fill: #edede7; font-family: 'JetBrains Mono', monospace; font-size: 10px; }
+                .tl  { fill: #edede7; font-family: 'JetBrains Mono', monospace; font-size: 11px; font-weight: 700; }
+                .ts  { fill: #9b9b95; font-family: 'JetBrains Mono', monospace; font-size: 10px; }
+                .h   { fill: #b8b315; font-family: 'Space Grotesk', sans-serif; font-weight: 600; font-size: 13px; }
             </style>
             <text x="10" y="18" class="h">Time on the x-axis &mdash; pre-Volta vs Volta+ schedule of a divergent warp</text>
 
